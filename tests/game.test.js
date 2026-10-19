@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {Game,DT} from '../core/game.js';import {Terrain} from '../core/terrain.js';
+import test from 'node:test';import assert from 'node:assert/strict';import {Game,DT,SHOT_CONFIG,launchSpeed} from '../core/game.js';import {Terrain} from '../core/terrain.js';
 const run=(g,n)=>{for(let i=0;i<n;i++)g.step(DT);};
 const fire=g=>{const power=g.players[g.active].power;if(!g.command({type:'charge'}))return false;run(g,Math.round(power*1.8));return g.command({type:'release'});};
 test('pixel circle carve preserves outside and supports boundaries',()=>{const t=new Terrain(100,100);t.mask.fill(1);t.carve(50,50,10);assert.equal(t.solid(50,50),false);assert.equal(t.solid(61,50),true);assert.equal(t.solid(50,60),false);t.carve(-5,-5,20);assert.equal(t.solid(0,0),false);});
@@ -8,10 +8,10 @@ test('invalid commands rejected and aim clamps',()=>{const g=new Game();assert.e
 test('fast shell cannot tunnel through one pixel wall',()=>{const g=new Game();g.terrain.mask.fill(0);for(let y=0;y<650;y++)g.terrain.mask[y*1100+500]=1;g.phase='flight';g.projectile={x:480,y:100,vx:6000,vy:0,age:0};g.step();assert.equal(g.projectile,null);assert.equal(g.effects.length,1);assert.ok(Math.abs(g.effects[0].x-500)<5);});
 test('gravity and wind integrate projectile',()=>{const g=new Game();g.terrain.mask.fill(0);g.phase='flight';g.wind=30;g.projectile={x:500,y:100,vx:0,vy:0,age:0};g.step();assert.equal(g.projectile.vx,30*DT);assert.equal(g.projectile.vy,430*DT);});
 test('shot alters terrain and changes turn exactly once',()=>{const g=new Game();g.command({type:'aim',angle:45,power:40});const v=g.terrain.version;fire(g);for(let i=0;i<2400&&g.turn===1;i++)g.step();assert.equal(g.turn,2);assert.equal(g.active,1);assert.ok(g.terrain.version>v);run(g,120);assert.equal(g.turn,2);});
-test('blast damage falls with distance',()=>{const g=new Game();const p=g.players[0];g.explode(p.x,p.y);assert.equal(p.hp,38);assert.equal(g.players[1].hp,100);});
-test('fall death, simultaneous draw, restart',()=>{const g=new Game();g.players[0].y=700;g.step();assert.equal(g.winner,1);assert.equal(g.phase,'ended');g.command({type:'restart'});g.players.forEach(p=>p.y=700);g.step();assert.equal(g.winner,-1);g.reset();assert.equal(g.phase,'aim');assert.deepEqual(g.players.map(p=>p.hp),[100,100]);});
+test('blast damage falls with distance',()=>{const g=new Game();const p=g.players[0];g.explode(p.x,p.y);assert.equal(p.hp,438);assert.equal(g.players[1].hp,500);});
+test('fall death, simultaneous draw, restart',()=>{const g=new Game();g.players[0].y=700;g.step();assert.equal(g.winner,1);assert.equal(g.phase,'ended');g.command({type:'restart'});g.players.forEach(p=>p.y=700);g.step();assert.equal(g.winner,-1);g.reset();assert.equal(g.phase,'aim');assert.deepEqual(g.players.map(p=>p.hp),[500,500]);});
 test('timeout forfeits without launching',()=>{const g=new Game();g.time=DT/2;g.step();assert.equal(g.phase,'settling');assert.equal(g.projectile,null);run(g,60);assert.equal(g.active,1);});
-test('charge rises then falls; release on return determines velocity',()=>{const g=new Game();assert.equal(g.command({type:'release'}),false);g.command({type:'charge'});run(g,90);assert.ok(Math.abs(g.charge-50)<.001);assert.equal(g.projectile,null);assert.equal(g.command({type:'charge'}),false);assert.equal(g.command({type:'move',dx:1}),false);run(g,90);assert.ok(Math.abs(g.charge-100)<.001);run(g,45);assert.equal(g.chargeDirection,-1);assert.ok(Math.abs(g.charge-75)<.001);assert.equal(g.command({type:'release'}),true);assert.ok(Math.abs(Math.hypot(g.projectile.vx,g.projectile.vy)-575)<.001);assert.equal(g.command({type:'release'}),false);});
+test('charge rises then falls; release on return determines velocity',()=>{const g=new Game();assert.equal(g.command({type:'release'}),false);g.command({type:'charge'});run(g,90);assert.ok(Math.abs(g.charge-50)<.001);assert.equal(g.projectile,null);assert.equal(g.command({type:'charge'}),false);assert.equal(g.command({type:'move',dx:1}),false);run(g,90);assert.ok(Math.abs(g.charge-100)<.001);run(g,45);assert.equal(g.chargeDirection,-1);assert.ok(Math.abs(g.charge-75)<.001);assert.equal(g.command({type:'release'}),true);assert.ok(Math.abs(Math.hypot(g.projectile.vx,g.projectile.vy)-(20+1130*.75))<.001);assert.equal(g.command({type:'release'}),false);});
 test('full charge cycle fails and changes turn once; stale release ignored',()=>{const g=new Game(),mask=g.terrain.version;g.command({type:'charge'});run(g,360);assert.equal(g.phase,'settling');assert.equal(g.projectile,null);assert.equal(g.events.filter(e=>e.type==='shotFailed').length,1);run(g,60);assert.equal(g.turn,2);assert.equal(g.active,1);assert.equal(g.terrain.version,mask);assert.equal(g.command({type:'release'}),false);run(g,120);assert.equal(g.turn,2);});
 test('restart and focus interruption cannot leave a charging state',()=>{const g=new Game();g.command({type:'charge'});run(g,50);g.command({type:'cancelCharge'});assert.equal(g.phase,'settling');assert.equal(g.projectile,null);g.command({type:'restart'});assert.equal(g.phase,'aim');assert.equal(g.charge,0);assert.equal(g.command({type:'release'}),false);});
 test('charging also respects the turn deadline',()=>{const g=new Game();g.time=.2;g.command({type:'charge'});run(g,30);assert.equal(g.projectile,null);assert.equal(g.phase,'settling');assert.equal(g.events.length,1);});
@@ -20,5 +20,51 @@ test('500 fuel budget is exact and replenishes on next turn',()=>{const g=new Ga
 test('airborne characters cannot step up walls',()=>{const g=new Game(),p=g.players[0];g.terrain.mask.fill(0);p.x=200;p.y=100;p.grounded=false;for(let y=80;y<130;y++)g.terrain.mask[y*1100+215]=1;g.command({type:'move',dx:2});assert.equal(p.x,200);assert.equal(g.fuel,500);});
 test('W elevation mirrors for mint while S reverses it',()=>{const g=new Game();g.command({type:'elevation',delta:15});assert.equal(g.players[0].angle,60);g.command({type:'elevation',delta:-15});assert.equal(g.players[0].angle,45);g.active=1;g.command({type:'elevation',delta:15});assert.equal(g.players[1].angle,120);g.command({type:'elevation',delta:-15});assert.equal(g.players[1].angle,135);});
 test('burst emits exactly three shells with pauses and cannot switch mid-charge',()=>{const g=new Game();g.command({type:'item',item:'burst'});g.command({type:'charge'});assert.equal(g.command({type:'item',item:'spread'}),false);run(g,90);g.command({type:'release'});assert.equal(g.projectiles.length,1);assert.equal(g.shotQueue.length,2);run(g,60);assert.equal(g.events.filter(e=>e.type==='projectileFired').length,1);run(g,6);assert.equal(g.events.filter(e=>e.type==='projectileFired').length,2);run(g,66);const shots=g.events.filter(e=>e.type==='projectileFired');assert.equal(shots.length,3);assert.ok(Math.abs(shots[1].at-.55)<DT);assert.ok(Math.abs(shots[2].at-1.1)<DT);assert.equal(g.turn,1);});
-test('spread launches three separate angles together and all resolve before one turn change',()=>{const g=new Game();g.command({type:'item',item:'spread'});fire(g);assert.equal(g.projectiles.length,3);assert.deepEqual(g.events.filter(e=>e.type==='projectileFired').map(e=>e.angle),[36,45,54]);assert.equal(g.shotQueue.length,0);for(let i=0;i<2400&&g.turn===1&&g.phase!=='ended';i++)g.step();assert.equal(g.turn,2);assert.equal(g.projectiles.length,0);assert.equal(g.item,'normal');assert.equal(g.events.filter(e=>e.type==='explosion').length,3);});
-test('early impact does not cancel queued burst shots or end the turn',()=>{const g=new Game();g.command({type:'item',item:'burst'});g.command({type:'charge'});run(g,90);g.command({type:'release'});g.projectiles[0].x=500;g.projectiles[0].y=600;g.step();assert.equal(g.projectiles.length,0);assert.equal(g.shotQueue.length,2);assert.equal(g.phase,'flight');run(g,66);assert.equal(g.events.filter(e=>e.type==='projectileFired').length,2);assert.equal(g.turn,1);g.command({type:'restart'});assert.equal(g.shotQueue.length,0);assert.equal(g.projectiles.length,0);assert.equal(g.item,'normal');});
+test('spread launches three separate angles together and all resolve before one turn change',()=>{const g=new Game();g.command({type:'item',item:'spread'});g.command({type:'aim',angle:45,power:40});fire(g);assert.equal(g.projectiles.length,3);assert.deepEqual(g.events.filter(e=>e.type==='projectileFired').map(e=>e.angle),[36,45,54]);assert.equal(g.shotQueue.length,0);for(let i=0;i<2400&&g.turn===1&&g.phase!=='ended';i++)g.step();assert.equal(g.turn,2);assert.equal(g.projectiles.length,0);assert.equal(g.items.size,0);assert.equal(g.events.filter(e=>e.type==='explosion').length,3);});
+test('early impact does not cancel queued burst shots or end the turn',()=>{const g=new Game();g.command({type:'item',item:'burst'});g.command({type:'charge'});run(g,90);g.command({type:'release'});g.projectiles[0].x=500;g.projectiles[0].y=600;g.step();assert.equal(g.projectiles.length,0);assert.equal(g.shotQueue.length,2);assert.equal(g.phase,'flight');run(g,66);assert.equal(g.events.filter(e=>e.type==='projectileFired').length,2);assert.equal(g.turn,1);g.command({type:'restart'});assert.equal(g.shotQueue.length,0);assert.equal(g.projectiles.length,0);assert.equal(g.items.size,0);});
+
+test('launch speed uses selected tuning and preserves endpoints',()=>{
+ assert.equal(SHOT_CONFIG.gamma,1);assert.equal(launchSpeed(0),20);assert.equal(launchSpeed(1),1150);
+ assert.ok(Math.abs(launchSpeed(.5)-(20+1130*.5))<1e-9);
+ assert.equal(launchSpeed(.5),585);
+ for(const item of ['normal','burst','spread']){const g=new Game();g.command({type:'item',item});g.command({type:'charge'});g.charge=100;g.command({type:'release'});for(const p of g.projectiles)assert.ok(Math.abs(Math.hypot(p.vx,p.vy)-1150)<1e-9);}
+});
+
+test('item modifiers combine into three volleys of three shells and cannot be revoked',()=>{
+ const g=new Game();assert.equal(g.items.size,0);
+ g.command({type:'item',item:'burst'});g.command({type:'item',item:'spread'});assert.equal(g.items.size,2);
+ assert.equal(g.command({type:'item',item:'burst'}),false);assert.deepEqual([...g.items],['burst','spread']);
+ g.command({type:'charge'});assert.equal(g.command({type:'item',item:'spread'}),false);run(g,90);g.command({type:'release'});
+ assert.equal(g.projectiles.length,3);assert.equal(g.shotQueue.length,6);run(g,132);
+ const shots=g.events.filter(e=>e.type==='projectileFired');assert.equal(shots.length,9);assert.deepEqual(shots.map(s=>s.angle),[36,45,54,36,45,54,36,45,54]);
+ g.command({type:'restart'});assert.equal(g.items.size,0);
+});
+
+test('plus one and plus two add volleys and combine with spread into twelve shells',()=>{
+ const g=new Game();for(const item of ['combo','burst','spread'])assert.equal(g.command({type:'item',item}),true);
+ assert.equal(g.itemEffects.length,3);assert.equal(g.command({type:'item',item:'combo'}),false);assert.equal(g.itemEffects.length,3);
+ g.command({type:'charge'});g.charge=40;g.command({type:'release'});assert.equal(g.projectiles.length,3);assert.equal(g.shotQueue.length,9);run(g,198);
+ assert.equal(g.events.filter(e=>e.type==='projectileFired').length,12);run(g,103);assert.equal(g.itemEffects.length,0);
+ g.command({type:'restart'});assert.equal(g.itemEffects.length,0);
+});
+test('plus one alone launches two shells',()=>{const g=new Game();g.command({type:'item',item:'combo'});g.command({type:'charge'});g.charge=40;g.command({type:'release'});assert.equal(g.projectiles.length,1);assert.equal(g.shotQueue.length,1);});
+test('PASS skips aiming or charging without firing and clears items on next turn',()=>{
+ for(const charge of [false,true]){const g=new Game();g.command({type:'item',item:'combo'});if(charge)g.command({type:'charge'});
+ assert.equal(g.command({type:'pass'}),true);assert.equal(g.phase,'settling');assert.equal(g.projectiles.length,0);assert.equal(g.shotQueue.length,0);assert.equal(g.command({type:'release'}),false);assert.equal(g.command({type:'pass'}),false);
+ run(g,120);assert.equal(g.turn,2);assert.equal(g.active,1);assert.equal(g.time>29,true);assert.equal(g.items.size,0);}
+ const g=new Game();fire(g);assert.equal(g.command({type:'pass'}),false);
+});
+
+test('explosion carves a horizontal ellipse with a shallower vertical reach',()=>{
+ const g=new Game();g.terrain.mask.fill(1);g.players.forEach(p=>{p.x=50;p.y=50;});g.explode(500,300);
+ assert.equal(g.terrain.solid(557,300),false);assert.equal(g.terrain.solid(559,300),true);
+ assert.equal(g.terrain.solid(500,331),false);assert.equal(g.terrain.solid(500,333),true);
+ assert.equal(g.terrain.solid(545,325),true);
+ assert.equal(g.effects.at(-1).radiusX,58);assert.equal(g.effects.at(-1).radiusY,32);
+});
+test('500 HP and horizontally elongated damage range reset consistently',()=>{
+ const g=new Game();assert.deepEqual(g.players.map(p=>p.hp),[500,500]);
+ Object.assign(g.players[0],{x:580,y:300});Object.assign(g.players[1],{x:500,y:380});g.explode(500,300);
+ assert.ok(g.players[0].hp<500);assert.equal(g.players[1].hp,500);
+ g.command({type:'restart'});assert.deepEqual(g.players.map(p=>p.hp),[500,500]);
+});
